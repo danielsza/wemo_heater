@@ -1,6 +1,7 @@
 """Support for WeMo heater devices."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -93,6 +94,8 @@ class WemoHeater(ClimateEntity):
             if device.temperature_unit == Temperature.Celsius
             else UnitOfTemperature.FAHRENHEIT
         )
+        # Set temperature step to 0.5 for finer control
+        self._attr_target_temperature_step = 0.5
 
     @property
     def current_temperature(self) -> float | None:
@@ -126,25 +129,40 @@ class WemoHeater(ClimateEntity):
     @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
+        # WeMo heater supports 4°C to 37°C
         if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
-            return 5.0
-        return 41.0
+            return 4.0
+        return 39.0  # ~4°C in Fahrenheit
 
     @property
     def max_temp(self) -> float:
         """Return the maximum temperature."""
+        # WeMo heater supports 4°C to 37°C
         if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
-            return 35.0
-        return 95.0
+            return 37.0
+        return 98.0  # ~37°C in Fahrenheit
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
 
+        _LOGGER.debug("Setting temperature to: %s", temperature)
+        
+        # Set temperature on device
         await self.hass.async_add_executor_job(
             self._device.set_target_temperature, temperature
         )
+        
+        # Give device time to process the command
+        await asyncio.sleep(0.5)
+        
+        # Update from device to get confirmed value
+        await self.hass.async_add_executor_job(self._device.update_attributes)
+        
+        _LOGGER.debug("Temperature confirmed as: %s", self._device.target_temperature)
+        
+        # Update HA state
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -158,6 +176,11 @@ class WemoHeater(ClimateEntity):
             _LOGGER.warning("Unsupported HVAC mode: %s", hvac_mode)
             return
 
+        # Give device time to process
+        await asyncio.sleep(0.3)
+        
+        # Wait for device to update
+        await self.hass.async_add_executor_job(self._device.update_attributes)
         self.async_write_ha_state()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
@@ -168,6 +191,12 @@ class WemoHeater(ClimateEntity):
 
         wemo_mode = PRESET_TO_WEMO_MODE[preset_mode]
         await self.hass.async_add_executor_job(self._device.set_mode, wemo_mode)
+        
+        # Give device time to process
+        await asyncio.sleep(0.3)
+        
+        # Wait for device to update
+        await self.hass.async_add_executor_job(self._device.update_attributes)
         self.async_write_ha_state()
 
     async def async_update(self) -> None:
