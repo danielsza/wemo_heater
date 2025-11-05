@@ -5,6 +5,6 @@
   "config_flow": true,
   "documentation": "https://github.com/danielsza/wemo_heater",
   "iot_class": "local_push",
-  "requirements": ["pywemo>=1.4.0"],
+  "requirements": ["pywemo==1.4.0"],
   "version": "1.0.0"
 }
