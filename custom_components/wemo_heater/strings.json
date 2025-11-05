@@ -16,5 +16,21 @@
     "abort": {
       "already_configured": "This heater is already configured."
     }
+  },
+  "entity": {
+    "climate": {
+      "wemo_heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "high": "High",
+              "low": "Low",
+              "eco": "Eco",
+              "frost_protect": "Frost Protect"
+            }
+          }
+        }
+      }
+    }
   }
 }
