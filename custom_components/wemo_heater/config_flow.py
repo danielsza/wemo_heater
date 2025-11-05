@@ -13,37 +13,28 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import DOMAIN
+from .heater_device import Heater
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_HOST): str,
-    }
-)
+STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_HOST): str})
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     host = data[CONF_HOST]
     
-    # Try to connect to the heater
     url = await hass.async_add_executor_job(pywemo.setup_url_for_address, host)
     
     if not url:
         raise CannotConnect(f"Unable to connect to heater at {host}")
     
     try:
-        device = await hass.async_add_executor_job(
-            pywemo.discovery.device_from_description, url
-        )
+        device = await hass.async_add_executor_job(Heater, url)
     except Exception as err:
+        _LOGGER.error("Error creating heater: %s", err, exc_info=True)
         raise CannotConnect(f"Unable to setup heater: {err}") from err
     
-    if not isinstance(device, pywemo.Heater):
-        raise NotAHeater(f"Device at {host} is not a WeMo heater")
-    
-    # Return info to store in the config entry
     return {
         "title": device.name,
         "unique_id": device.serial_number,
@@ -66,9 +57,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 info = await validate_input(self.hass, user_input)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except NotAHeater:
-                errors["base"] = "not_a_heater"
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
@@ -89,7 +78,3 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class CannotConnect(Exception):
     """Error to indicate we cannot connect."""
-
-
-class NotAHeater(Exception):
-    """Error to indicate device is not a heater."""
