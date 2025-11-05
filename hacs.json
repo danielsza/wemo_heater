@@ -1,0 +1,5 @@
+{
+    "name": "wemo with heater support",
+    "render_readme": true,
+    "homeassistant": "2025.10.0"
+}
