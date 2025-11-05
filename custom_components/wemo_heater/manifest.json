@@ -1,19 +1,10 @@
 {
-  "version": "1.1",
   "domain": "wemo_heater",
-  "name": "Belkin WeMo with heater",
-  "codeowners": ["@esev"],
+  "name": "WeMo Heater",
+  "codeowners": [],
   "config_flow": true,
-  "documentation": "https://www.home-assistant.io/integrations/wemo",
-  "homekit": {
-    "models": ["Socket", "Wemo"]
-  },
+  "documentation": "https://github.com/danielsza/wemo_heater",
   "iot_class": "local_push",
-  "loggers": ["pywemo"],
-  "requirements": ["pywemo==1.4.0"],
-  "ssdp": [
-    {
-      "manufacturer": "Belkin International Inc."
-    }
-  ]
+  "requirements": ["pywemo>=1.4.0"],
+  "version": "1.0.0"
 }
