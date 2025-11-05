@@ -4,8 +4,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import pywemo
-
 from homeassistant.components.climate import (
     ClimateEntity,
     ClimateEntityFeature,
@@ -18,23 +16,22 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
+from .heater_device import Heater, Mode, Temperature
 
 _LOGGER = logging.getLogger(__name__)
 
-# Map pywemo heater modes to Home Assistant HVAC modes
 WEMO_MODE_TO_HVAC = {
-    pywemo.HeaterMode.Off: HVACMode.OFF,
-    pywemo.HeaterMode.Frostprotect: HVACMode.AUTO,
-    pywemo.HeaterMode.Low: HVACMode.HEAT,
-    pywemo.HeaterMode.High: HVACMode.HEAT,
-    pywemo.HeaterMode.Eco: HVACMode.AUTO,
+    Mode.Off: HVACMode.OFF,
+    Mode.Frostprotect: HVACMode.AUTO,
+    Mode.Low: HVACMode.HEAT,
+    Mode.High: HVACMode.HEAT,
+    Mode.Eco: HVACMode.AUTO,
 }
 
-# Map Home Assistant HVAC modes back to pywemo modes
 HVAC_TO_WEMO_MODE = {
-    HVACMode.OFF: pywemo.HeaterMode.Off,
-    HVACMode.HEAT: pywemo.HeaterMode.High,
-    HVACMode.AUTO: pywemo.HeaterMode.Eco,
+    HVACMode.OFF: Mode.Off,
+    HVACMode.HEAT: Mode.High,
+    HVACMode.AUTO: Mode.Eco,
 }
 
 
@@ -59,14 +56,14 @@ class WemoHeater(ClimateEntity):
     )
     _enable_turn_on_off_backwards_compatibility = False
 
-    def __init__(self, device: pywemo.Heater) -> None:
+    def __init__(self, device: Heater) -> None:
         """Initialize the WeMo heater."""
         self._device = device
         self._attr_name = device.name
         self._attr_unique_id = device.serial_number
         self._attr_temperature_unit = (
             UnitOfTemperature.CELSIUS
-            if device.temperature_unit == pywemo.HeaterTemperature.Celsius
+            if device.temperature_unit == Temperature.Celsius
             else UnitOfTemperature.FAHRENHEIT
         )
 
@@ -88,7 +85,7 @@ class WemoHeater(ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction:
         """Return current HVAC action."""
-        if self._device.mode == pywemo.HeaterMode.Off:
+        if self._device.mode == Mode.Off:
             return HVACAction.OFF
         if self._device.heating_status:
             return HVACAction.HEATING
