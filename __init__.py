@@ -32,6 +32,9 @@ WEMO_MODEL_DISPATCH = {
     "Bridge": [Platform.LIGHT],
     "CoffeeMaker": [Platform.SWITCH],
     "Dimmer": [Platform.LIGHT],
+    "Heater": [Platform.CLIMATE],  # ← ADD THIS LINE
+    "HeaterA": [Platform.CLIMATE],  # ← ADD THIS LINE
+    "HeaterB": [Platform.CLIMATE],  # ← ADD THIS LINE (if there's a B model)
     "Humidifier": [Platform.FAN],
     "Insight": [Platform.BINARY_SENSOR, Platform.SWITCH],
     "LightSwitch": [Platform.SWITCH],
