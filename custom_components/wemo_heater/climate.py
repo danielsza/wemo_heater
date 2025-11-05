@@ -18,8 +18,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import DeviceCoordinator
-from .entity import WemoEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,67 +43,60 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up WeMo climate entities."""
-    coordinators: list[DeviceCoordinator] = hass.data[DOMAIN][config_entry.entry_id]
-
-    async_add_entities(
-        WemoHeater(coordinator)
-        for coordinator in coordinators
-        if isinstance(coordinator.wemo, pywemo.Heater)
-    )
+    """Set up WeMo heater climate entities."""
+    device = hass.data[DOMAIN][config_entry.entry_id]
+    async_add_entities([WemoHeater(device)])
 
 
-class WemoHeater(WemoEntity, ClimateEntity):
+class WemoHeater(ClimateEntity):
     """Representation of a WeMo heater."""
 
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.TURN_OFF
+        | ClimateEntityFeature.TURN_ON
     )
     _enable_turn_on_off_backwards_compatibility = False
 
-    def __init__(self, coordinator: DeviceCoordinator) -> None:
+    def __init__(self, device: pywemo.Heater) -> None:
         """Initialize the WeMo heater."""
-        super().__init__(coordinator)
+        self._device = device
+        self._attr_name = device.name
+        self._attr_unique_id = device.serial_number
         self._attr_temperature_unit = (
             UnitOfTemperature.CELSIUS
-            if coordinator.wemo.temperature_unit == pywemo.HeaterTemperature.Celsius
+            if device.temperature_unit == pywemo.HeaterTemperature.Celsius
             else UnitOfTemperature.FAHRENHEIT
         )
 
     @property
-    def wemo(self) -> pywemo.Heater:
-        """Return the heater device."""
-        return self.coordinator.wemo
-
-    @property
     def current_temperature(self) -> float | None:
         """Return the current temperature."""
-        return self.wemo.current_temperature
+        return self._device.current_temperature
 
     @property
     def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
-        return self.wemo.target_temperature
+        return self._device.target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode."""
-        return WEMO_MODE_TO_HVAC.get(self.wemo.mode, HVACMode.OFF)
+        return WEMO_MODE_TO_HVAC.get(self._device.mode, HVACMode.OFF)
 
     @property
     def hvac_action(self) -> HVACAction:
         """Return current HVAC action."""
-        if self.wemo.mode == pywemo.HeaterMode.Off:
+        if self._device.mode == pywemo.HeaterMode.Off:
             return HVACAction.OFF
-        if self.wemo.heating_status:
+        if self._device.heating_status:
             return HVACAction.HEATING
         return HVACAction.IDLE
 
     @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
-        # These are typical ranges for heaters
         if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
             return 5.0
         return 41.0
@@ -123,9 +114,9 @@ class WemoHeater(WemoEntity, ClimateEntity):
             return
 
         await self.hass.async_add_executor_job(
-            self.wemo.set_target_temperature, temperature
+            self._device.set_target_temperature, temperature
         )
-        await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target HVAC mode."""
@@ -134,14 +125,18 @@ class WemoHeater(WemoEntity, ClimateEntity):
             return
 
         wemo_mode = HVAC_TO_WEMO_MODE[hvac_mode]
-        await self.hass.async_add_executor_job(self.wemo.set_mode, wemo_mode)
-        await self.coordinator.async_request_refresh()
+        await self.hass.async_add_executor_job(self._device.set_mode, wemo_mode)
+        self.async_write_ha_state()
+
+    async def async_update(self) -> None:
+        """Update the entity."""
+        await self.hass.async_add_executor_job(self._device.update_attributes)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return device specific state attributes."""
         return {
-            "heater_mode": self.wemo.mode_string,
-            "auto_off_time": self.wemo.auto_off_time,
-            "time_remaining": self.wemo.time_remaining,
+            "heater_mode": self._device.mode_string,
+            "auto_off_time": self._device.auto_off_time,
+            "time_remaining": self._device.time_remaining,
         }
