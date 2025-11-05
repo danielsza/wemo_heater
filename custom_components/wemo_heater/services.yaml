@@ -1,7 +1,7 @@
 set_humidity:
   target:
     entity:
-      integration: wemo
+      integration: wemo_heater
       domain: fan
   fields:
     target_humidity:
@@ -16,5 +16,5 @@ set_humidity:
 reset_filter_life:
   target:
     entity:
-      integration: wemo
+      integration: wemo_heater
       domain: fan
