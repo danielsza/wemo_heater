@@ -94,8 +94,8 @@ class WemoHeater(ClimateEntity):
             if device.temperature_unit == Temperature.Celsius
             else UnitOfTemperature.FAHRENHEIT
         )
-        # Set temperature step to 0.5 for finer control
-        self._attr_target_temperature_step = 0.5
+        # Temperature step is 1.0 degree (full degrees only)
+        self._attr_target_temperature_step = 1.0
 
     @property
     def current_temperature(self) -> float | None:
@@ -129,18 +129,24 @@ class WemoHeater(ClimateEntity):
     @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
-        # WeMo heater supports 4°C to 37°C
+        # Frost protect mode: 4°C, Normal modes: 16°C
+        if self._device.mode == Mode.Frostprotect:
+            if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
+                return 4.0
+            return 39.0  # ~4°C in Fahrenheit
+        
+        # Normal heating modes
         if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
-            return 4.0
-        return 39.0  # ~4°C in Fahrenheit
+            return 16.0
+        return 61.0  # ~16°C in Fahrenheit
 
     @property
     def max_temp(self) -> float:
         """Return the maximum temperature."""
-        # WeMo heater supports 4°C to 37°C
+        # All modes: 29°C maximum
         if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
-            return 37.0
-        return 98.0  # ~37°C in Fahrenheit
+            return 29.0
+        return 84.0  # ~29°C in Fahrenheit
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
