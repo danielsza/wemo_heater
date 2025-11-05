@@ -1,74 +1,95 @@
-"""Config flow for Wemo."""
-
+"""Config flow for WeMo Heater integration."""
 from __future__ import annotations
 
-from dataclasses import fields
-from typing import Any, get_type_hints
+import logging
+from typing import Any
 
 import pywemo
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.config_entry_flow import DiscoveryFlowHandler
+from homeassistant import config_entries
+from homeassistant.const import CONF_HOST
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
 
 from .const import DOMAIN
-from .coordinator import Options, OptionsValidationError
+
+_LOGGER = logging.getLogger(__name__)
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_HOST): str,
+    }
+)
 
 
-async def _async_has_devices(hass: HomeAssistant) -> bool:
-    """Return if there are devices that can be discovered."""
-    return bool(await hass.async_add_executor_job(pywemo.discover_devices))
+async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+    """Validate the user input allows us to connect."""
+    host = data[CONF_HOST]
+    
+    # Try to connect to the heater
+    url = await hass.async_add_executor_job(pywemo.setup_url_for_address, host)
+    
+    if not url:
+        raise CannotConnect(f"Unable to connect to heater at {host}")
+    
+    try:
+        device = await hass.async_add_executor_job(
+            pywemo.discovery.device_from_description, url
+        )
+    except Exception as err:
+        raise CannotConnect(f"Unable to setup heater: {err}") from err
+    
+    if not isinstance(device, pywemo.Heater):
+        raise NotAHeater(f"Device at {host} is not a WeMo heater")
+    
+    # Return info to store in the config entry
+    return {
+        "title": device.name,
+        "unique_id": device.serial_number,
+    }
 
 
-class WemoFlow(DiscoveryFlowHandler, domain=DOMAIN):
-    """Discovery flow with options for Wemo."""
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for WeMo Heater."""
 
-    def __init__(self) -> None:
-        """Init discovery flow."""
-        super().__init__(DOMAIN, "Wemo", _async_has_devices)
+    VERSION = 1
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Get the options flow for this handler."""
-        return WemoOptionsFlow()
-
-
-class WemoOptionsFlow(OptionsFlow):
-    """Options flow for the WeMo component."""
-
-    async def async_step_init(
+    async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Manage options for the WeMo component."""
-        errors: dict[str, str] | None = None
+    ) -> FlowResult:
+        """Handle the initial step."""
+        errors: dict[str, str] = {}
+        
         if user_input is not None:
             try:
-                Options(**user_input)
-            except OptionsValidationError as err:
-                errors = {err.field_key: err.error_key}
+                info = await validate_input(self.hass, user_input)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except NotAHeater:
+                errors["base"] = "not_a_heater"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
             else:
-                return self.async_create_entry(title="", data=user_input)
+                await self.async_set_unique_id(info["unique_id"])
+                self._abort_if_unique_id_configured()
+                
+                return self.async_create_entry(
+                    title=info["title"],
+                    data=user_input,
+                )
 
         return self.async_show_form(
-            step_id="init",
-            data_schema=_schema_for_options(Options(**self.config_entry.options)),
+            step_id="user",
+            data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
         )
 
 
-def _schema_for_options(options: Options) -> vol.Schema:
-    """Return the Voluptuous schema for the Options instance.
+class CannotConnect(Exception):
+    """Error to indicate we cannot connect."""
 
-    All values are optional. The default value is set to the current value and
-    the type hint is set to the value of the field type annotation.
-    """
-    return vol.Schema(
-        {
-            vol.Optional(
-                field.name, default=getattr(options, field.name)
-            ): get_type_hints(options)[field.name]
-            for field in fields(options)
-        }
-    )
+
+class NotAHeater(Exception):
+    """Error to indicate device is not a heater."""
