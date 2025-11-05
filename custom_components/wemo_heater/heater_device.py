@@ -2,7 +2,6 @@
 from enum import IntEnum
 from typing import TypedDict
 
-# Use system pywemo for base classes
 from pywemo.ouimeaux_device.api.attributes import AttributeDevice
 
 
@@ -85,7 +84,9 @@ class Heater(AttributeDevice):
 
     def set_target_temperature(self, temperature):
         """Set the target temperature."""
-        self._set_attributes(('SetTemperature', float(temperature)))
+        # Round to nearest whole degree and send as float
+        temp_float = float(round(temperature))
+        self._set_attributes(('SetTemperature', temp_float))
 
     @property
     def temperature_unit(self):
