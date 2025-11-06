@@ -9,7 +9,6 @@ from homeassistant.components.climate import (
     ClimateEntityFeature,
     HVACAction,
     HVACMode,
-    PRESET_NONE,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
@@ -21,36 +20,40 @@ from .heater_device import Heater, Mode, Temperature
 
 _LOGGER = logging.getLogger(__name__)
 
-# Map WeMo modes to HVAC modes (for basic on/off/heat)
+# Map WeMo modes to Home Assistant HVAC modes
 WEMO_MODE_TO_HVAC = {
     Mode.Off: HVACMode.OFF,
-    Mode.Frostprotect: HVACMode.HEAT,
+    Mode.Frostprotect: HVACMode.AUTO,
     Mode.Low: HVACMode.HEAT,
     Mode.High: HVACMode.HEAT,
-    Mode.Eco: HVACMode.HEAT,
+    Mode.Eco: HVACMode.AUTO,
 }
 
-# Preset mode names
-PRESET_FROST_PROTECT = "Frost Protect"
-PRESET_LOW = "Low"
-PRESET_HIGH = "High"
-PRESET_ECO = "Eco"
+# Default HVAC mode mapping (when no preset is selected)
+HVAC_TO_WEMO_MODE = {
+    HVACMode.OFF: Mode.Off,
+    HVACMode.HEAT: Mode.High,
+    HVACMode.AUTO: Mode.Eco,
+}
 
-# Map preset modes to WeMo modes
+# Preset modes for granular control of all 5 heater modes
+PRESET_ECO = "eco"
+PRESET_LOW = "low"
+PRESET_HIGH = "high"
+PRESET_FROST_PROTECT = "frost_protect"
+
 PRESET_TO_WEMO_MODE = {
-    PRESET_FROST_PROTECT: Mode.Frostprotect,
+    PRESET_ECO: Mode.Eco,
     PRESET_LOW: Mode.Low,
     PRESET_HIGH: Mode.High,
-    PRESET_ECO: Mode.Eco,
+    PRESET_FROST_PROTECT: Mode.Frostprotect,
 }
 
-# Map WeMo modes to preset modes
 WEMO_MODE_TO_PRESET = {
-    Mode.Frostprotect: PRESET_FROST_PROTECT,
+    Mode.Eco: PRESET_ECO,
     Mode.Low: PRESET_LOW,
     Mode.High: PRESET_HIGH,
-    Mode.Eco: PRESET_ECO,
-    Mode.Off: PRESET_NONE,
+    Mode.Frostprotect: PRESET_FROST_PROTECT,
 }
 
 
@@ -67,18 +70,13 @@ async def async_setup_entry(
 class WemoHeater(ClimateEntity):
     """Representation of a WeMo heater."""
 
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
-    _attr_preset_modes = [
-        PRESET_FROST_PROTECT,
-        PRESET_LOW,
-        PRESET_HIGH,
-        PRESET_ECO,
-    ]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
+    _attr_preset_modes = [PRESET_ECO, PRESET_LOW, PRESET_HIGH, PRESET_FROST_PROTECT]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.TURN_OFF
         | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.PRESET_MODE
     )
     _enable_turn_on_off_backwards_compatibility = False
 
@@ -87,11 +85,6 @@ class WemoHeater(ClimateEntity):
         self._device = device
         self._attr_name = device.name
         self._attr_unique_id = device.serial_number
-        self._attr_temperature_unit = (
-            UnitOfTemperature.CELSIUS
-            if device.temperature_unit == Temperature.Celsius
-            else UnitOfTemperature.FAHRENHEIT
-        )
 
     @property
     def current_temperature(self) -> float | None:
@@ -102,6 +95,15 @@ class WemoHeater(ClimateEntity):
     def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         return self._device.target_temperature
+
+    @property
+    def temperature_unit(self) -> str:
+        """Return the unit of measurement."""
+        return (
+            UnitOfTemperature.CELSIUS
+            if self._device.temperature_unit == Temperature.Celsius
+            else UnitOfTemperature.FAHRENHEIT
+        )
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -119,20 +121,24 @@ class WemoHeater(ClimateEntity):
 
     @property
     def preset_mode(self) -> str | None:
-        """Return current preset mode."""
-        return WEMO_MODE_TO_PRESET.get(self._device.mode, PRESET_NONE)
+        """Return the current preset mode."""
+        # Return None when in Off mode (no preset)
+        if self._device.mode == Mode.Off:
+            return None
+        # Return the corresponding preset for current mode
+        return WEMO_MODE_TO_PRESET.get(self._device.mode, PRESET_ECO)
 
     @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
-        if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
+        if self.temperature_unit == UnitOfTemperature.CELSIUS:
             return 5.0
         return 41.0
 
     @property
     def max_temp(self) -> float:
         """Return the maximum temperature."""
-        if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
+        if self.temperature_unit == UnitOfTemperature.CELSIUS:
             return 35.0
         return 95.0
 
@@ -147,20 +153,30 @@ class WemoHeater(ClimateEntity):
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set new target HVAC mode."""
-        if hvac_mode == HVACMode.OFF:
-            await self.hass.async_add_executor_job(self._device.set_mode, Mode.Off)
-        elif hvac_mode == HVACMode.HEAT:
-            # When turning on heating, use Eco mode as default
-            await self.hass.async_add_executor_job(self._device.set_mode, Mode.Eco)
-        else:
+        """Set new target HVAC mode.
+        
+        When setting HVAC mode without a preset, use default modes:
+        - OFF -> Off
+        - HEAT -> High
+        - AUTO -> Eco
+        """
+        if hvac_mode not in HVAC_TO_WEMO_MODE:
             _LOGGER.warning("Unsupported HVAC mode: %s", hvac_mode)
             return
-        
+
+        wemo_mode = HVAC_TO_WEMO_MODE[hvac_mode]
+        await self.hass.async_add_executor_job(self._device.set_mode, wemo_mode)
         self.async_write_ha_state()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set new preset mode."""
+        """Set new preset mode.
+        
+        Preset modes provide granular control over all heater modes:
+        - eco: Eco mode (energy saving)
+        - low: Low heat
+        - high: High heat  
+        - frost_protect: Frost protection mode
+        """
         if preset_mode not in PRESET_TO_WEMO_MODE:
             _LOGGER.warning("Unsupported preset mode: %s", preset_mode)
             return
