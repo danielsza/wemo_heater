@@ -85,6 +85,8 @@ class WemoHeater(ClimateEntity):
         self._device = device
         self._attr_name = device.name
         self._attr_unique_id = device.serial_number
+        self._cached_target_temp = None
+        self._cache_timestamp = 0
 
     @property
     def current_temperature(self) -> float | None:
@@ -94,6 +96,15 @@ class WemoHeater(ClimateEntity):
     @property
     def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
+        import time
+        
+        # If we have a cached value that's less than 10 seconds old, use it
+        if self._cached_target_temp is not None:
+            age = time.time() - self._cache_timestamp
+            if age < 10:  # Cache valid for 10 seconds
+                return self._cached_target_temp
+        
+        # Otherwise return device value
         return self._device.target_temperature
 
     @property
@@ -144,12 +155,24 @@ class WemoHeater(ClimateEntity):
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
+        import time
+        
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
 
+        # Cache the requested temperature for immediate UI feedback
+        self._cached_target_temp = temperature
+        self._cache_timestamp = time.time()
+        
+        # Immediately update UI with cached value
+        self.async_write_ha_state()
+
+        # Send to device in background
         await self.hass.async_add_executor_job(
             self._device.set_target_temperature, temperature
         )
+        
+        # Update UI again after device confirms
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -188,6 +211,10 @@ class WemoHeater(ClimateEntity):
     async def async_update(self) -> None:
         """Update the entity."""
         await self.hass.async_add_executor_job(self._device.update_attributes)
+        
+        # Clear cache after update so we use real device value
+        self._cached_target_temp = None
+        self._cache_timestamp = 0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
