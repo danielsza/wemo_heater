@@ -1,7 +1,6 @@
 """Representation of a WeMo Heater device."""
 from enum import IntEnum
 from typing import TypedDict
-
 from pywemo.ouimeaux_device.api.attributes import AttributeDevice
 
 
@@ -74,19 +73,53 @@ class Heater(AttributeDevice):
 
     @property
     def current_temperature(self):
-        """Return the current temperature in current units."""
+        """Return the current temperature in current units.
+        
+        Note: Device returns temperature in the display unit (respects TempUnit setting).
+        """
         return float(self._attributes.get('Temperature', 0))
 
     @property
     def target_temperature(self):
-        """Return the target temperature in current units."""
+        """Return the target temperature in current units.
+        
+        Note: Device returns temperature in the display unit (respects TempUnit setting).
+        """
         return float(self._attributes.get('SetTemperature', 0))
 
     def set_target_temperature(self, temperature):
-        """Set the target temperature."""
-        # Round to nearest whole degree and send as float
-        temp_float = float(round(temperature))
-        self._set_attributes(('SetTemperature', temp_float))
+        """Set the target temperature.
+        
+        Args:
+            temperature: Target temperature in current display unit (Celsius or Fahrenheit
+                        based on temperature_unit property)
+        
+        Notes:
+            CRITICAL: The WeMo heater API has an asymmetric behavior:
+            - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
+            - OUTPUT (GetAttributes): Returns temperature in current display unit
+            
+            This method automatically converts Celsius to Fahrenheit when sending
+            to the device API, ensuring proper temperature setting in Celsius mode.
+        """
+        # Round to nearest whole degree
+        temp_value = float(round(temperature))
+        
+        # CRITICAL FIX: Convert to Fahrenheit if currently in Celsius mode
+        # The device API always expects Fahrenheit for input!
+        if self.temperature_unit == Temperature.Celsius:
+            # Convert Celsius to Fahrenheit for API
+            temp_fahrenheit = (temp_value * 9.0 / 5.0) + 32.0
+        else:
+            # Already in Fahrenheit
+            temp_fahrenheit = temp_value
+        
+        # Send Fahrenheit to device (API requirement)
+        self._set_attributes(('SetTemperature', temp_fahrenheit))
+        
+        # Update local cache with display unit value
+        # Device will return the value in display unit, so cache that
+        self._attributes['SetTemperature'] = temp_value
 
     @property
     def temperature_unit(self):
@@ -99,7 +132,11 @@ class Heater(AttributeDevice):
         return "C" if self.temperature_unit == Temperature.Celsius else "F"
 
     def set_temperature_unit(self, unit):
-        """Set the temperature unit."""
+        """Set the temperature unit.
+        
+        Note: This only changes the DISPLAY unit. The API still expects
+        Fahrenheit for input (handled automatically by set_target_temperature).
+        """
         if isinstance(unit, str):
             unit = Temperature.Celsius if unit.upper() == 'C' else Temperature.Fahrenheit
         self._set_attributes(('TempUnit', int(unit)))
@@ -141,3 +178,17 @@ class Heater(AttributeDevice):
         if force_update:
             self.update_attributes()
         return self.state
+
+    def get_temperature_range(self):
+        """Return the valid temperature range for this device.
+        
+        Returns:
+            tuple: (min_temp, max_temp) in current display unit
+        
+        Note:
+            These are typical ranges for WeMo heaters.
+        """
+        if self.temperature_unit == Temperature.Celsius:
+            return (16, 29)  # Typical Celsius range
+        else:
+            return (60, 85)  # Typical Fahrenheit range
