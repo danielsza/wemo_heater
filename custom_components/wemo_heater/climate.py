@@ -9,6 +9,7 @@ from homeassistant.components.climate import (
     ClimateEntityFeature,
     HVACAction,
     HVACMode,
+    PRESET_NONE,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
@@ -20,18 +21,36 @@ from .heater_device import Heater, Mode, Temperature
 
 _LOGGER = logging.getLogger(__name__)
 
+# Map WeMo modes to HVAC modes (for basic on/off/heat)
 WEMO_MODE_TO_HVAC = {
     Mode.Off: HVACMode.OFF,
-    Mode.Frostprotect: HVACMode.AUTO,
+    Mode.Frostprotect: HVACMode.HEAT,
     Mode.Low: HVACMode.HEAT,
     Mode.High: HVACMode.HEAT,
-    Mode.Eco: HVACMode.AUTO,
+    Mode.Eco: HVACMode.HEAT,
 }
 
-HVAC_TO_WEMO_MODE = {
-    HVACMode.OFF: Mode.Off,
-    HVACMode.HEAT: Mode.High,
-    HVACMode.AUTO: Mode.Eco,
+# Preset mode names
+PRESET_FROST_PROTECT = "Frost Protect"
+PRESET_LOW = "Low"
+PRESET_HIGH = "High"
+PRESET_ECO = "Eco"
+
+# Map preset modes to WeMo modes
+PRESET_TO_WEMO_MODE = {
+    PRESET_FROST_PROTECT: Mode.Frostprotect,
+    PRESET_LOW: Mode.Low,
+    PRESET_HIGH: Mode.High,
+    PRESET_ECO: Mode.Eco,
+}
+
+# Map WeMo modes to preset modes
+WEMO_MODE_TO_PRESET = {
+    Mode.Frostprotect: PRESET_FROST_PROTECT,
+    Mode.Low: PRESET_LOW,
+    Mode.High: PRESET_HIGH,
+    Mode.Eco: PRESET_ECO,
+    Mode.Off: PRESET_NONE,
 }
 
 
@@ -48,9 +67,16 @@ async def async_setup_entry(
 class WemoHeater(ClimateEntity):
     """Representation of a WeMo heater."""
 
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
+    _attr_preset_modes = [
+        PRESET_FROST_PROTECT,
+        PRESET_LOW,
+        PRESET_HIGH,
+        PRESET_ECO,
+    ]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.TURN_OFF
         | ClimateEntityFeature.TURN_ON
     )
@@ -92,6 +118,11 @@ class WemoHeater(ClimateEntity):
         return HVACAction.IDLE
 
     @property
+    def preset_mode(self) -> str | None:
+        """Return current preset mode."""
+        return WEMO_MODE_TO_PRESET.get(self._device.mode, PRESET_NONE)
+
+    @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
         if self._attr_temperature_unit == UnitOfTemperature.CELSIUS:
@@ -117,11 +148,24 @@ class WemoHeater(ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target HVAC mode."""
-        if hvac_mode not in HVAC_TO_WEMO_MODE:
+        if hvac_mode == HVACMode.OFF:
+            await self.hass.async_add_executor_job(self._device.set_mode, Mode.Off)
+        elif hvac_mode == HVACMode.HEAT:
+            # When turning on heating, use Eco mode as default
+            await self.hass.async_add_executor_job(self._device.set_mode, Mode.Eco)
+        else:
             _LOGGER.warning("Unsupported HVAC mode: %s", hvac_mode)
             return
+        
+        self.async_write_ha_state()
 
-        wemo_mode = HVAC_TO_WEMO_MODE[hvac_mode]
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set new preset mode."""
+        if preset_mode not in PRESET_TO_WEMO_MODE:
+            _LOGGER.warning("Unsupported preset mode: %s", preset_mode)
+            return
+
+        wemo_mode = PRESET_TO_WEMO_MODE[preset_mode]
         await self.hass.async_add_executor_job(self._device.set_mode, wemo_mode)
         self.async_write_ha_state()
 
