@@ -102,31 +102,19 @@ class Heater(AttributeDevice):
             This method automatically converts Celsius to Fahrenheit when sending
             to the device API, ensuring proper temperature setting in Celsius mode.
         """
-        import logging
-        _LOGGER = logging.getLogger(__name__)
-        
-        # DEBUG: Log what we received
-        _LOGGER.error(f"[WEMO_DEBUG] set_target_temperature called with: {temperature}")
-        _LOGGER.error(f"[WEMO_DEBUG] temperature_unit: {self.temperature_unit}")
-        _LOGGER.error(f"[WEMO_DEBUG] Temperature.Celsius value: {Temperature.Celsius}")
-        
         # Round to nearest whole degree
         temp_value = float(round(temperature))
-        _LOGGER.error(f"[WEMO_DEBUG] After rounding: {temp_value}")
         
         # CRITICAL FIX: Convert to Fahrenheit if currently in Celsius mode
         # The device API always expects Fahrenheit for input!
         if self.temperature_unit == Temperature.Celsius:
             # Convert Celsius to Fahrenheit for API
             temp_fahrenheit = (temp_value * 9.0 / 5.0) + 32.0
-            _LOGGER.error(f"[WEMO_DEBUG] Device in Celsius mode, converting: {temp_value}°C -> {temp_fahrenheit}°F")
         else:
             # Already in Fahrenheit
             temp_fahrenheit = temp_value
-            _LOGGER.error(f"[WEMO_DEBUG] Device in Fahrenheit mode, using directly: {temp_fahrenheit}°F")
         
         # Send Fahrenheit to device (API requirement)
-        _LOGGER.error(f"[WEMO_DEBUG] Calling _set_attributes with: {temp_fahrenheit}")
         self._set_attributes(('SetTemperature', temp_fahrenheit))
         
         # DON'T cache here - let climate.py handle caching
