@@ -87,6 +87,7 @@ class WemoHeater(ClimateEntity):
         self._attr_unique_id = device.serial_number
         self._cached_target_temp = None
         self._cache_timestamp = 0
+        self._setting_temperature = False  # Flag to prevent cache clearing during set
 
     @property
     def current_temperature(self) -> float | None:
@@ -97,24 +98,30 @@ class WemoHeater(ClimateEntity):
     def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         import time
+        import logging
+        _LOGGER = logging.getLogger(__name__)
         
         # If we have a cached value that's less than 10 seconds old, use it
         if self._cached_target_temp is not None:
             age = time.time() - self._cache_timestamp
             if age < 10:  # Cache valid for 10 seconds
+                _LOGGER.error(f"[CLIMATE_DEBUG] target_temperature returning CACHED: {self._cached_target_temp} (age: {age:.1f}s)")
                 return self._cached_target_temp
         
         # Otherwise return device value
-        return self._device.target_temperature
+        device_value = self._device.target_temperature
+        _LOGGER.error(f"[CLIMATE_DEBUG] target_temperature returning DEVICE: {device_value}")
+        return device_value
 
     @property
     def temperature_unit(self) -> str:
-        """Return the unit of measurement."""
-        return (
-            UnitOfTemperature.CELSIUS
-            if self._device.temperature_unit == Temperature.Celsius
-            else UnitOfTemperature.FAHRENHEIT
-        )
+        """Return the unit of measurement.
+        
+        Always return Celsius since the WeMo device operates in Celsius
+        and we handle the conversion internally.
+        """
+        # Always use Celsius - the device operates in Celsius mode
+        return UnitOfTemperature.CELSIUS
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -156,24 +163,42 @@ class WemoHeater(ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         import time
+        import asyncio
+        import logging
+        _LOGGER = logging.getLogger(__name__)
         
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
 
+        _LOGGER.error(f"[CLIMATE_DEBUG] async_set_temperature called with: {temperature}")
+        _LOGGER.error(f"[CLIMATE_DEBUG] self.temperature_unit: {self.temperature_unit}")
+        _LOGGER.error(f"[CLIMATE_DEBUG] self._device.temperature_unit: {self._device.temperature_unit}")
+
+        # Set flag to prevent cache clearing during this operation
+        self._setting_temperature = True
+        
         # Cache the requested temperature for immediate UI feedback
         self._cached_target_temp = temperature
         self._cache_timestamp = time.time()
+        
+        _LOGGER.error(f"[CLIMATE_DEBUG] Cached: {self._cached_target_temp}")
         
         # Immediately update UI with cached value
         self.async_write_ha_state()
 
         # Send to device in background
+        _LOGGER.error(f"[CLIMATE_DEBUG] Calling device.set_target_temperature({temperature})")
         await self.hass.async_add_executor_job(
             self._device.set_target_temperature, temperature
         )
         
+        # Keep the flag set for 3 more seconds to prevent updates from clearing cache
+        await asyncio.sleep(3)
+        self._setting_temperature = False
+        
         # Update UI again after device confirms
         self.async_write_ha_state()
+        _LOGGER.error(f"[CLIMATE_DEBUG] Done")
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target HVAC mode.
@@ -210,9 +235,18 @@ class WemoHeater(ClimateEntity):
 
     async def async_update(self) -> None:
         """Update the entity."""
+        import logging
+        _LOGGER = logging.getLogger(__name__)
+        
         await self.hass.async_add_executor_job(self._device.update_attributes)
         
+        # Don't clear cache if we're in the middle of setting temperature
+        if self._setting_temperature:
+            _LOGGER.error(f"[CLIMATE_DEBUG] async_update: skipping cache clear (setting in progress)")
+            return
+            
         # Clear cache after update so we use real device value
+        _LOGGER.error(f"[CLIMATE_DEBUG] async_update: clearing cache")
         self._cached_target_temp = None
         self._cache_timestamp = 0
 
