@@ -82,10 +82,14 @@ class Heater(AttributeDevice):
     @property
     def target_temperature(self):
         """Return the target temperature in current units.
-        
-        Note: Device returns temperature in the display unit (respects TempUnit setting).
+
+        Note: Device always returns SetTemperature in Fahrenheit internally,
+        regardless of TempUnit setting. We convert to the display unit here.
         """
-        return float(self._attributes.get('SetTemperature', 0))
+        raw_value = float(self._attributes.get('SetTemperature', 0))
+        if self.temperature_unit == Temperature.Celsius:
+            return round((raw_value - 32.0) * 5.0 / 9.0)
+        return raw_value
 
     def set_target_temperature(self, temperature):
         """Set the target temperature.
