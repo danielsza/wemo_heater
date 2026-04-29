@@ -83,13 +83,13 @@ class Heater(AttributeDevice):
     def target_temperature(self):
         """Return the target temperature in current units.
 
-        Note: Device always returns SetTemperature in Fahrenheit internally,
-        regardless of TempUnit setting. We convert to the display unit here.
+        Note: The WeMo heater API has asymmetric behavior:
+        - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
+        - OUTPUT (GetAttributes): Returns SetTemperature in the display unit
+          (respects TempUnit setting), same as Temperature (current temp).
+        No conversion needed on read.
         """
-        raw_value = float(self._attributes.get('SetTemperature', 0))
-        if self.temperature_unit == Temperature.Celsius:
-            return round((raw_value - 32.0) * 5.0 / 9.0)
-        return raw_value
+        return float(self._attributes.get('SetTemperature', 0))
 
     def set_target_temperature(self, temperature):
         """Set the target temperature.
@@ -99,30 +99,19 @@ class Heater(AttributeDevice):
                         based on temperature_unit property)
         
         Notes:
-            CRITICAL: The WeMo heater API has an asymmetric behavior:
+            The WeMo heater API has asymmetric behavior:
             - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
-            - OUTPUT (GetAttributes): Returns temperature in current display unit
+            - OUTPUT (GetAttributes): Returns temperature in display unit
             
-            This method automatically converts Celsius to Fahrenheit when sending
-            to the device API, ensuring proper temperature setting in Celsius mode.
+            This method converts Celsius to Fahrenheit when sending to the device.
         """
-        # Round to nearest whole degree
         temp_value = float(round(temperature))
         
-        # CRITICAL FIX: Convert to Fahrenheit if currently in Celsius mode
-        # The device API always expects Fahrenheit for input!
+        # Convert to Fahrenheit for the API (device always expects F for input)
         if self.temperature_unit == Temperature.Celsius:
-            # Convert Celsius to Fahrenheit for API
-            temp_fahrenheit = (temp_value * 9.0 / 5.0) + 32.0
-        else:
-            # Already in Fahrenheit
-            temp_fahrenheit = temp_value
+            temp_value = (temp_value * 9.0 / 5.0) + 32.0
         
-        # Send Fahrenheit to device (API requirement)
-        self._set_attributes(('SetTemperature', temp_fahrenheit))
-        
-        # DON'T cache here - let climate.py handle caching
-        # The device will return the correct value on next refresh
+        self._set_attributes(('SetTemperature', temp_value))
 
     @property
     def temperature_unit(self):
@@ -195,3 +184,4 @@ class Heater(AttributeDevice):
             return (16, 29)  # Typical Celsius range
         else:
             return (60, 85)  # Typical Fahrenheit range
+
