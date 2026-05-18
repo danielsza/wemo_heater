@@ -81,15 +81,21 @@ class Heater(AttributeDevice):
 
     @property
     def target_temperature(self):
-        """Return the target temperature in current units.
+        """Return the target temperature in current display units.
 
-        Note: The WeMo heater API has asymmetric behavior:
+        Note: The WeMo heater API is fully asymmetric:
         - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
-        - OUTPUT (GetAttributes): Returns SetTemperature in the display unit
-          (respects TempUnit setting), same as Temperature (current temp).
-        No conversion needed on read.
+        - OUTPUT (GetAttributes): Also returns SetTemperature in Fahrenheit
+          (despite documentation suggesting it respects TempUnit).
+        We must convert to Celsius on read when display unit is Celsius.
         """
-        return float(self._attributes.get('SetTemperature', 0))
+        raw_temp = float(self._attributes.get('SetTemperature', 0))
+        if raw_temp == 0:
+            return None
+        # API always returns SetTemperature in Fahrenheit - convert if display is Celsius
+        if self.temperature_unit == Temperature.Celsius:
+            return round((raw_temp - 32.0) * 5.0 / 9.0)
+        return raw_temp
 
     def set_target_temperature(self, temperature):
         """Set the target temperature.
