@@ -105,9 +105,10 @@ class Heater(AttributeDevice):
                         based on temperature_unit property)
         
         Notes:
-            The WeMo heater API has asymmetric behavior:
+            CRITICAL: The WeMo heater API always uses Fahrenheit for SetTemperature:
             - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
-            - OUTPUT (GetAttributes): Returns temperature in display unit
+            - OUTPUT (GetAttributes): Also returns SetTemperature in Fahrenheit
+              (current_temperature/Temperature respects TempUnit, but SetTemperature does not)
             
             This method converts Celsius to Fahrenheit when sending to the device.
         """
