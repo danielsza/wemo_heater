@@ -94,7 +94,7 @@ class Heater(AttributeDevice):
             return None
         # API always returns SetTemperature in Fahrenheit - convert if display is Celsius
         if self.temperature_unit == Temperature.Celsius:
-            return round((raw_temp - 32.0) * 5.0 / 9.0)
+            return round((raw_temp - 32.0) * 5.0 / 9.0, 1)
         return raw_temp
 
     def set_target_temperature(self, temperature):
