@@ -73,29 +73,35 @@ class Heater(AttributeDevice):
 
     @property
     def current_temperature(self):
-        """Return the current temperature in current units.
-        
-        Note: Device returns temperature in the display unit (respects TempUnit setting).
+        """Return the current temperature in Celsius.
+
+        Note: Device may return temperature in either unit.
+        Values > 50 are Fahrenheit (room temp in C is always < 50).
         """
-        return float(self._attributes.get('Temperature', 0))
+        raw_temp = float(self._attributes.get('Temperature', 0))
+        if raw_temp > 50:
+            return round((raw_temp - 32.0) * 5.0 / 9.0, 1)
+        return raw_temp
 
     @property
     def target_temperature(self):
-        """Return the target temperature in current display units.
+        """Return the target temperature in Celsius.
 
-        Note: The WeMo heater API is fully asymmetric:
+        Note: The WeMo heater API behavior:
         - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
-        - OUTPUT (GetAttributes): Also returns SetTemperature in Fahrenheit
-          (despite documentation suggesting it respects TempUnit).
-        We must convert to Celsius on read when display unit is Celsius.
+        - OUTPUT (GetAttributes): May return SetTemperature in EITHER unit
+          depending on device state/firmware. Values > 50 are always Fahrenheit
+          (since max Celsius target is 29°C). Values <= 50 are Celsius.
+        This heuristic matches the approach used by homebridge-wemo.
         """
         raw_temp = float(self._attributes.get('SetTemperature', 0))
         if raw_temp == 0:
             return None
-        # API always returns SetTemperature in Fahrenheit - convert if display is Celsius
-        if self.temperature_unit == Temperature.Celsius:
+        # Device may return in either F or C — values > 50 are always F
+        # (valid Celsius range is 4-29, valid Fahrenheit range is 40-84)
+        if raw_temp > 50:
             return round((raw_temp - 32.0) * 5.0 / 9.0, 1)
-        return raw_temp
+        return round(raw_temp, 1)
 
     def set_target_temperature(self, temperature):
         """Set the target temperature.
