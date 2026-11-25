@@ -90,12 +90,12 @@ class WemoHeater(ClimateEntity):
         self._setting_temperature = False  # Flag to prevent cache clearing during set
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the current temperature."""
         return self._device.current_temperature
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         import time
         
@@ -109,13 +109,14 @@ class WemoHeater(ClimateEntity):
         return self._device.target_temperature
 
     @property
-    def temperature_unit(self) -> str:
+    def native_temperature_unit(self) -> str:
         """Return the unit of measurement.
-        
-        Always return Celsius since the WeMo device operates in Celsius
-        and we handle the conversion internally.
+
+        The entity always works in Celsius. heater_device.py converts the
+        heater's readings to Celsius using its TempUnit setting, and
+        converts setpoints back to Fahrenheit (what the heater API expects).
+        Home Assistant then displays in the user's chosen unit.
         """
-        # Always use Celsius - the device operates in Celsius mode
         return UnitOfTemperature.CELSIUS
 
     @property
@@ -144,16 +145,12 @@ class WemoHeater(ClimateEntity):
     @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
-        if self.temperature_unit == UnitOfTemperature.CELSIUS:
-            return 5.0
-        return 41.0
+        return 5.0  # 41 F, the Frost Protect setpoint
 
     @property
     def max_temp(self) -> float:
         """Return the maximum temperature."""
-        if self.temperature_unit == UnitOfTemperature.CELSIUS:
-            return 35.0
-        return 95.0
+        return 29.0  # 84 F, the heater's highest setpoint
 
     @property
     def target_temperature_step(self) -> float:
@@ -168,8 +165,10 @@ class WemoHeater(ClimateEntity):
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
 
-        # Round to whole degree (heater only supports whole degrees)
-        temperature = round(temperature)
+        # Keep full Celsius precision; the device rounds to whole degrees F
+        # in set_target_temperature. Rounding here (in Celsius) would turn
+        # e.g. 71F into 72F.
+        temperature = float(temperature)
 
         # Set flag to prevent cache clearing during this operation
         self._setting_temperature = True
@@ -245,4 +244,9 @@ class WemoHeater(ClimateEntity):
             "heater_mode": self._device.mode_string,
             "auto_off_time": self._device.auto_off_time,
             "time_remaining": self._device.time_remaining,
+            # Diagnostics: the heater's own display unit and the raw values it
+            # reports, before any unit conversion by this integration.
+            "device_temperature_unit": self._device.temperature_unit_string,
+            "raw_temperature": self._device._attributes.get("Temperature"),
+            "raw_set_temperature": self._device._attributes.get("SetTemperature"),
         }

@@ -71,60 +71,64 @@ class Heater(AttributeDevice):
             mode = Mode[mode]
         self._set_attributes(('Mode', int(mode)))
 
+    @staticmethod
+    def _f_to_c(value):
+        return round((value - 32.0) * 5.0 / 9.0, 1)
+
     @property
     def current_temperature(self):
-        """Return the current temperature in Celsius.
+        """Return the current room temperature in Celsius.
 
-        Note: Device may return temperature in either unit.
-        Values > 50 are Fahrenheit (room temp in C is always < 50).
+        The heater reports room temperature in its display unit (TempUnit).
+        A Celsius reading above 50 cannot be a real room temperature, so it
+        is treated as Fahrenheit (guards against firmware that ignores
+        TempUnit).
         """
-        raw_temp = float(self._attributes.get('Temperature', 0))
-        if raw_temp > 50:
-            return round((raw_temp - 32.0) * 5.0 / 9.0, 1)
-        return raw_temp
+        raw = self._attributes.get('Temperature')
+        if raw is None:
+            return None
+        raw = float(raw)
+        if self.temperature_unit == Temperature.Fahrenheit or raw > 50:
+            return self._f_to_c(raw)
+        return round(raw, 1)
 
     @property
     def target_temperature(self):
         """Return the target temperature in Celsius.
 
-        Note: The WeMo heater API behavior:
-        - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
-        - OUTPUT (GetAttributes): May return SetTemperature in EITHER unit
-          depending on device state/firmware. Values > 50 are always Fahrenheit
-          (since max Celsius target is 29°C). Values <= 50 are Celsius.
-        This heuristic matches the approach used by homebridge-wemo.
+        Some firmware reports SetTemperature in Fahrenheit even when TempUnit
+        is Celsius. The valid setpoint ranges do not overlap (about 4-29 C
+        and 40-84 F), so a value of 39 or more is always Fahrenheit and 35 or
+        less is always Celsius. TempUnit only decides values in between.
+        This also fixes the Frost Protect setpoint (41 F), which the old
+        "above 50 means Fahrenheit" rule read as 41 C.
         """
-        raw_temp = float(self._attributes.get('SetTemperature', 0))
-        if raw_temp == 0:
+        raw = self._attributes.get('SetTemperature')
+        if raw in (None, 0, '0'):
             return None
-        # Device may return in either F or C — values > 50 are always F
-        # (valid Celsius range is 4-29, valid Fahrenheit range is 40-84)
-        if raw_temp > 50:
-            return round((raw_temp - 32.0) * 5.0 / 9.0, 1)
-        return round(raw_temp, 1)
+        raw = float(raw)
+        if raw >= 39:
+            is_fahrenheit = True
+        elif raw <= 35:
+            is_fahrenheit = False
+        else:
+            is_fahrenheit = self.temperature_unit == Temperature.Fahrenheit
+        return self._f_to_c(raw) if is_fahrenheit else round(raw, 1)
 
     def set_target_temperature(self, temperature):
         """Set the target temperature.
-        
+
         Args:
-            temperature: Target temperature in current display unit (Celsius or Fahrenheit
-                        based on temperature_unit property)
-        
+            temperature: Target temperature in Celsius. The climate entity
+                always reports Celsius to Home Assistant, so HA hands us
+                Celsius here no matter what unit the heater displays.
+
         Notes:
-            CRITICAL: The WeMo heater API always uses Fahrenheit for SetTemperature:
-            - INPUT (SetAttributes): Always expects Fahrenheit regardless of TempUnit
-            - OUTPUT (GetAttributes): Also returns SetTemperature in Fahrenheit
-              (current_temperature/Temperature respects TempUnit, but SetTemperature does not)
-            
-            This method converts Celsius to Fahrenheit when sending to the device.
+            The WeMo heater API always expects Fahrenheit for SetTemperature,
+            regardless of the device's TempUnit setting, so always convert.
         """
-        temp_value = float(round(temperature))
-        
-        # Convert to Fahrenheit for the API (device always expects F for input)
-        if self.temperature_unit == Temperature.Celsius:
-            temp_value = (temp_value * 9.0 / 5.0) + 32.0
-        
-        self._set_attributes(('SetTemperature', temp_value))
+        temp_f = int(round(float(temperature) * 9.0 / 5.0 + 32.0))
+        self._set_attributes(('SetTemperature', temp_f))
 
     @property
     def temperature_unit(self):
